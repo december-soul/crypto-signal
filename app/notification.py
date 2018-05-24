@@ -11,6 +11,7 @@ from notifiers.discord_client import DiscordNotifier
 from notifiers.gmail_client import GmailNotifier
 from notifiers.telegram_client import TelegramNotifier
 from notifiers.webhook_client import WebhookNotifier
+from notifiers.stdout_client import StdoutNotifier
 
 class Notifier():
     """Handles sending notifications via the configured notifiers
@@ -82,6 +83,11 @@ class Notifier():
             )
             enabled_notifiers.append('webhook')
 
+        self.stdout_configured = self._validate_required_config('stdout', notifier_config)
+        if self.stdout_configured:
+            self.stdout_client = StdoutNotifier()
+            enabled_notifiers.append('stdout')
+
         self.logger.info('enabled notifers: %s', enabled_notifiers)
 
 
@@ -98,7 +104,7 @@ class Notifier():
         self.notify_gmail(new_analysis)
         self.notify_telegram(new_analysis)
         self.notify_webhook(new_analysis)
-
+        self.notify_stdout(new_analysis)
 
     def notify_discord(self, new_analysis):
         """Send a notification via the discord notifier
@@ -198,6 +204,23 @@ class Notifier():
             self.webhook_client.notify(new_analysis)
 
 
+    def notify_stdout(self, new_analysis):
+        """Send a notification via the stdout notifier
+
+        Args:
+            new_analysis (dict): The new_analysis to send.
+        """
+
+        if self.stdout_configured:
+            message = self._indicator_message_templater(
+                new_analysis,
+                self.notifier_config['stdout']['optional']['template']
+            )
+            if message.strip():
+                self.stdout_client.notify(message)
+        else:
+            print("stdout is diabled")
+
     def _validate_required_config(self, notifier, notifier_config):
         """Validate the required configuration items are present for a notifier.
 
@@ -234,6 +257,7 @@ class Notifier():
         new_message = str()
         for exchange in new_analysis:
             for market in new_analysis[exchange]:
+                message_list = list()
                 for indicator_type in new_analysis[exchange][market]:
                     if indicator_type == 'informants':
                         continue
@@ -294,18 +318,32 @@ class Notifier():
 
                                 if not analysis['config']['alert_enabled']:
                                     should_alert = False
+                                message_list.append({"should_alert":should_alert,
+                                                    "values":values, "exchange":exchange, "market":market, "indicator":indicator, "index":index,
+                                                    "analysis":analysis, "status":status, "last_status":last_status})
 
-                                if should_alert:
-                                    new_message += message_template.render(
-                                        values=values,
-                                        exchange=exchange,
-                                        market=market,
-                                        indicator=indicator,
-                                        indicator_number=index,
-                                        analysis=analysis,
-                                        status=status,
-                                        last_status=last_status
-                                    )
+                hot_count = 0
+                cold_count = 0
+                for possible_massage in message_list:
+                    if possible_massage['status'] == 'hot':
+                        hot_count = hot_count + 1
+                    if possible_massage['status'] == 'cold':
+                        cold_count = cold_count + 1
+
+                for possible_massage in message_list:
+                    if possible_massage['should_alert']:
+                        new_message += message_template.render(
+                            values=possible_massage['values'],
+                            exchange=possible_massage['exchange'],
+                            market=possible_massage['market'],
+                            indicator=possible_massage['indicator'],
+                            indicator_number=possible_massage['index'],
+                            analysis=possible_massage['analysis'],
+                            status=possible_massage['status'],
+                            last_status=possible_massage['last_status'],
+                            hot_count=hot_count,
+                            cold_count=cold_count
+                        )
 
         # Merge changes from new analysis into last analysis
         self.last_analysis = {**self.last_analysis, **new_analysis}
