@@ -268,6 +268,7 @@ class Notifier():
                     for indicator in new_analysis[exchange][market][indicator_type]:
                         for index, analysis in enumerate(new_analysis[exchange][market][indicator_type][indicator]):
                             if analysis['result'].shape[0] == 0:
+                                self.logger.info('No results for %s #%s', indicator, index)
                                 continue
 
                             values = dict()
@@ -335,7 +336,21 @@ class Notifier():
                         cold_count = cold_count + 1
 
                 for possible_massage in message_list:
+                    should_alert = True
                     if possible_massage['should_alert']:
+                        if possible_massage['status'] == 'hot' and hot_count < self.notifier_config['general']['min_hot']:
+                            should_alert = False
+                            print("Market={} Indicator={} suppress notification. To few hot indicators. you got {} but you need {}".format(
+                                    possible_massage['market'], possible_massage['indicator'], hot_count, self.notifier_config['general']['min_hot']))
+
+                        if possible_massage['status'] == 'cold' and cold_count < self.notifier_config['general']['min_cold']:
+                            should_alert = False
+                            print("Market={} Indicator={} suppress notification. To few cold indicators. you got {} but you need {}".format(
+                                    possible_massage['market'], possible_massage['indicator'], cold_count, self.notifier_config['general']['min_cold']))
+                    else:
+                        should_alert = False
+
+                    if should_alert:
                         new_message += message_template.render(
                             values=possible_massage['values'],
                             exchange=possible_massage['exchange'],
